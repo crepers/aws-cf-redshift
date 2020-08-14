@@ -1,0 +1,211 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation Template to create Amazon Redshift Cluster'  
+
+Parameters:
+  VPCID:
+    Description: The name of the VPC.
+    Type: String
+    AllowedPattern: '([a-z]|[0-9]|-)+'
+
+  SubnetsPrivateID:
+    Description: The name of the private subnets id.
+    Type: String
+    AllowedPattern: '([a-z]|[0-9]|,|-)+'
+
+  BastionSecurityGroupID:
+    Description: The name of the Security Group ID of Bastion Host.
+    Type: String
+    AllowedPattern: '([a-z]|[0-9]|-)+'
+    
+  DatabaseName:
+    Description: The name of the first database to be created when the cluster is created.
+    Type: String
+    Default: rsdev01
+    AllowedPattern: '([a-z]|[0-9])+' 
+    
+  RedshiftClusterPort:
+    Description: The port number on which the cluster accepts incoming connections.
+    Type: Number
+    Default: '8200'
+  
+  NumberOfNodes:
+    Description: >-
+      The number of compute nodes in the cluster. For multi-node clusters, the NumberOfNodes parameter must be greater than 1.
+    Type: Number
+    Default: '2'
+  
+  NodeType:
+    Description: The type of node to be provisioned
+    Type: String
+    Default: dc2.large
+    AllowedValues:
+      - dc2.large
+      - dc2.8xlarge
+      - ds2.xlarge
+      - ds2.8xlarge
+  
+  MasterUsername:
+    Description: The user name that is associated with the master user account for the cluster that is being created
+    Type: String
+    Default: rsadmin
+    AllowedPattern: '([a-z])([a-z]|[0-9])*'
+    ConstraintDescription: must start with a-z and contain only a-z or 0-9.
+  
+  MasterUserPassword:
+    Description: The password that is associated with the master user account for the cluster that is being created.
+    Type: String
+    NoEcho: 'true'
+    MinLength: '8'
+    MaxLength: '64'
+    AllowedPattern: >-
+     ^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?!._*[@/\\\"']).*$
+    ConstraintDescription: >-
+     Enter alphanumeric password for the master user. The password must contain 8 to 64 printable ASCII characters, excluding: /, ", \'', \ and @. It must contain one uppercase letter, one lowercase letter, and one number.
+     
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Environment
+      -
+        Label:
+          default: Amazon Redshift Parameters
+        Parameters:
+          - NodeType
+          - NumberOfNodes
+          - RedshiftClusterPort
+          - DatabaseName
+          - MasterUsername
+          - MasterUserPassword
+    ParameterLabels:
+      DatabaseName:
+        default: Redshift database name
+      RedshiftClusterPort:
+        default: Redshift cluster port
+      NodeType:
+        default: Node type for Redshift cluster
+      NumberOfNodes:
+        default: Number of nodes in Redshift cluster
+      MasterUsername:
+        default: Redshift master user name
+      MasterUserPassword:
+        default: Redshift master user password
+
+Conditions:
+  RedshiftSingleNodeClusterCondition:
+    Fn::Equals:
+    - Ref: NumberOfNodes
+    - '1'
+    
+Resources:
+
+  RedshiftSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Join [ " ", [ !Ref 'AWS::StackName', " - Redshift Security Group" ] ]
+      VpcId : !Ref VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref RedshiftClusterPort
+          ToPort: !Ref RedshiftClusterPort
+          SourceSecurityGroupId: !Ref BastionSecurityGroupID
+          Description: 'Access to Bastion Host Security Group'  
+        - !Ref 'AWS::NoValue'
+      Tags:
+        -
+          Key: Name
+          Value: !Sub '${AWS::StackName}-RedshiftSecurityGroup'
+                      
+  RedshiftClusterSubnetGroup:
+    Type: 'AWS::Redshift::ClusterSubnetGroup'
+    Properties:
+      Description: Cluster subnet group
+      SubnetIds: !Split [',', !Ref SubnetsPrivateID]
+      Tags:
+        -
+          Key: Name
+          Value: !Join [ "-", [ !Ref 'AWS::StackName', "Primary Redshift Cluster Subnet group" ] ]
+  RedshiftRole:
+    Type: AWS::IAM::Role
+    Properties :
+      RoleName: RedshiftLabRole
+      AssumeRolePolicyDocument:
+        Version : 2012-10-17
+        Statement :
+          -
+            Effect : Allow
+            Principal :
+              Service :
+                - redshift.amazonaws.com
+            Action :
+              - sts:AssumeRole
+      Path : /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+
+  RedshiftCluster:
+    Type: 'AWS::Redshift::Cluster'
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      ClusterType: !If [RedshiftSingleNodeClusterCondition, "single-node", "multi-node"]
+      ClusterIdentifier: !Join ["-", [!Ref DatabaseName, !Ref 'AWS::StackName']]
+      NumberOfNodes: !If [RedshiftSingleNodeClusterCondition, !Ref "AWS::NoValue", !Ref NumberOfNodes]
+      NodeType: !Ref NodeType
+      DBName: !Ref DatabaseName
+      Port: !Ref RedshiftClusterPort
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      ClusterParameterGroupName: default.redshift-1.0
+      IamRoles:
+        - Fn::GetAtt: [RedshiftRole, Arn]
+      VpcSecurityGroupIds:
+        - !Ref RedshiftSecurityGroup
+      PubliclyAccessible: 'false'
+      ClusterSubnetGroupName: !Ref RedshiftClusterSubnetGroup
+      Tags:
+        -
+          Key: Name
+          Value: !Join [ "-", [ !Ref 'AWS::StackName', "Redshift-Cluster" ] ]
+ 
+Outputs:
+
+  StackName:
+    Description: 'Stack name'
+    Value: !Sub '${AWS::StackName}'
+
+  RedshiftClusterEndpoint:
+    Description: Redshift Cluster endpoint
+    Value: !Sub "${RedshiftCluster.Endpoint.Address}:${RedshiftCluster.Endpoint.Port}"
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftClusterEndpoint'
+    
+  PSQLCommandLine:    
+    Description: PSQL Command Line
+    Value: !Join
+             - ''
+             - - 'psql -h '
+               - !GetAtt 'RedshiftCluster.Endpoint.Address' 
+               - ' -p '
+               - !GetAtt 'RedshiftCluster.Endpoint.Port'
+               - ' -U '
+               - !Ref MasterUsername
+               - ' -d '
+               - !Ref DatabaseName
+    
+  RedshiftDatabaseName:
+    Description: Name of the Redshift Database
+    Value: !Ref DatabaseName
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftDatabaseName'
+    
+  RedshiftUsername:
+    Value: !Ref MasterUsername
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftUsername'
+  
+  RedshiftRoleName:
+    Value: !Ref RedshiftLab
+  
