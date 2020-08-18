@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  AWS CloudFormation templates to create AWS Elasticsearch Service domain.
+  **WARNING** This template creates an Amazon Elasticsearch domain. You will be billed for the AWS resources used if you create a stack from this template.
+Parameters:
+  DomainName:
+    Description: 'A name for the Amazon ES domain.'
+    AllowedPattern : '[a-z][a-z0-9\-]+'
+    Type: String
+  
+  ElasticsearchVersion:
+    Description: 'Elasticsearch version'
+    Type: String
+    Default: '7.4'
+    AllowedValues: ['7.4', '7.1', '6.8', '6.7', '6.5', '6.4', '6.3', '6.2', '6.0', '5.6', '5.5'] # aws es list-elasticsearch-versions --query "ElasticsearchVersions[]"
+  
+  NodeType:
+    Description: The node type to be provisioned for the Elasticsearch cluster
+    Type: String
+    Default: t2.small.elasticsearch
+    AllowedValues:
+      - t2.small.elasticsearch
+      - m5.large.elasticsearch
+      - m5.xlarge.elasticsearch
+      - m4.large.elasticsearch
+      - m4.xlarge.elasticsearch
+      - c5.large.elasticsearch
+      - c5.xlarge.elasticsearch
+      - c4.large.elasticsearch
+      - c4.xlarge.elasticsearch
+      - r5.large.elasticsearch
+      - r5.xlarge.elasticsearch
+      - r4.large.elasticsearch
+      - r4.xlarge.elasticsearch
+    ConstraintDescription: must be a valid Elasticsearch node type.
+  
+  NodeCount:
+    Description: The number of nodes in the Elasticsearch cluster.
+    Type: Number
+    Default: '1'
+  
+  VPCID:
+    Description: The name of the VPC.
+    # Type: String
+    Type: AWS::EC2::VPC::Id
+    AllowedPattern: '([a-z]|[0-9]|-)+'
+
+  SubNet1:
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: "Must be the Subnet ID of an existing Subnet."
+  
+  SubNet2:
+    Type: AWS::EC2::Subnet::Id
+    ConstraintDescription: "Must be the Subnet ID of an existing Subnet." 
+
+  BastionSecurityGroupID:
+    Description: The name of the Security Group ID of Bastion Host.
+    # Type: String
+    Type: AWS::EC2::SecurityGroup::Id
+    AllowedPattern: '([a-z]|[0-9]|-)+'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Amazon ElasticSearch Parameters
+        Parameters:
+          - DomainName
+          - ElasticsearchVersion
+          - NodeType
+          - NodeCount
+      -
+        Label:
+          default: Environment
+        Parameters:
+          - VPCID
+          - SubNet1
+          - SubNet2
+          - BastionSecurityGroupID
+
+Conditions:
+  HasSingleClusterInstance: !Equals [!Ref NodeCount, '1']
+
+Resources:
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Ref 'AWS::StackName'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        SourceSecurityGroupId: !Ref BastionSecurityGroupID
+      VpcId: !Ref VPCID
+
+  ElasticsearchDomain:
+    Type: 'AWS::Elasticsearch::Domain'
+    Properties:
+      DomainName: !Ref 'DomainName'
+      ElasticsearchClusterConfig:
+        DedicatedMasterEnabled: 'false'
+        InstanceCount: !Ref NodeCount
+        ZoneAwarenessEnabled: 'false'
+        InstanceType: !Ref NodeType
+      ElasticsearchVersion: !Ref ElasticsearchVersion
+      AccessPolicies:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: '*'
+            Action:
+            - 'es:ESHttp*'
+      VPCOptions:
+        SecurityGroupIds: 
+        - !Ref SecurityGroup
+        SubnetIds: !If
+        - HasSingleClusterInstance
+        - - !Ref SubNet1
+        - - !Ref SubNet1
+          - !Ref SubNet2
+      EBSOptions:
+        EBSEnabled: true
+        Iops: 0
+        VolumeSize: 10
+        VolumeType: gp2
+      SnapshotOptions:
+        AutomatedSnapshotStartHour: '0'
+      AdvancedOptions:
+        rest.action.multi.allow_explicit_index: 'true'
+
+Outputs:
+  KibanaURL:
+    Description: Kibana URL
+    Value: !Join 
+      - ''
+      - - !GetAtt 
+          - ElasticsearchDomain
+          - DomainEndpoint
+        - /_plugin/kibana/
+  ElasticsearchEndpoint:
+    Description: Elasticsearch domain endpoint
+    Value: !GetAtt 
+      - ElasticsearchDomain
+      - DomainEndpoint
+  ElasticsearchDomainARN:
+    Description: Elasticsearch domain ARN
+    Value: !GetAtt 
+      - ElasticsearchDomain
+      - DomainArn
