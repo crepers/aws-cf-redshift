@@ -1,6 +1,6 @@
 # Set defaults if the Env vars aren't set
 ifeq ($(YOUR_EMAIL),)
-YOUR_EMAIL := 'woochul@amazon.com'
+YOUR_EMAIL := 'youremail'
 endif
 
 ifeq ($(STACK_NAME),)
@@ -8,7 +8,7 @@ STACK_NAME := 'cognito-lambda-test-stack'
 endif
 
 ifeq ($(STACK_BUCKET),)
-STACK_BUCKET := 'wcjung-cognito-test-stack-plumbing-bucket'
+STACK_BUCKET := 'cognito-test-stack-plumbing-bucket'
 endif
 
 .PHONY: test
