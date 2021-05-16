@@ -1,0 +1,441 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates an API gateway that's backed by a Lambda function
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "S3"
+        Parameters:
+          - S3BucketLambdaSource
+          - S3BucketStoredImagesName
+          - S3BucketStoredVodName
+      - 
+        Label:
+          default: "DynamoDB"
+        Parameters:
+          - StreamLikesTableName
+          - DynamoReadCapacityUnits
+          - DynamoWriteCapacityUnits
+      # -
+      #   Label:
+      #     default: "Lambda"
+      #   Parameters:
+      #     - CognitoIdentityPoolName
+
+      -
+        Label:
+          default: "API Gateway"
+          Paremeters:
+            - ApiGatewayRestApiName
+
+Parameters:
+
+# S3
+  S3BucketStoredImagesName:
+    Description: Name of the S3 bucket will be used to store images uploaded from the Broadcast APP
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9\-]+'
+    MinLength: '3'
+    MaxLength: '63'
+    ConstraintDescription: The bucket name can be between 3 and 63 characters long, and can contain only lower-case characters, numbers, periods, and dashes.
+  S3BucketStoredVodName:
+    Description: Name of the S3 bucket will be used for Vod Storage / playback
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9\-]+'
+    MinLength: '3'
+    MaxLength: '63'
+    ConstraintDescription: The bucket name can be between 3 and 63 characters long, and can contain only lower-case characters, numbers, periods, and dashes.
+  S3BucketLambdaSource:
+    Description: Name of the S3 bucket will be used for Lambda Source files
+    Type: String
+    AllowedPattern: '[a-z][a-z0-9\-]+'
+    MinLength: '3'
+    MaxLength: '63'
+    ConstraintDescription: The bucket name can be between 3 and 63 characters long, and can contain only lower-case characters, numbers, periods, and dashes.
+
+# API Gateway
+  ApiGatewayRestApiName:
+    Description: Name of the API to create
+    Type: String
+    AllowedPattern: '[A-Za-z0-9]*'
+    MinLength: '4'
+    MaxLength: '2048'
+    ConstraintDescription: must contain only alphanumeric characters (at least four)
+  
+ # DynamoDB   
+  StreamLikesTableName:
+    Description: Name of the DynamoDB will store likes
+    Type: String
+    Default: 'StreamLikes'
+    AllowedPattern: '[a-zA-Z0-9_.-]+'
+    MinLength: '3'
+    MaxLength: '20'
+  DynamoReadCapacityUnits:
+    Description: Provisioned read throughput
+    Type: Number
+    Default: '5'
+    MinValue: '1'
+    MaxValue: '10000'
+    ConstraintDescription: must be between 1 and 10000
+  DynamoWriteCapacityUnits:
+    Description: Provisioned write throughput
+    Type: Number
+    Default: '5'
+    MinValue: '1'
+    MaxValue: '10000'
+    ConstraintDescription: must be between 1 and 10000
+
+Resources:
+# S3 bucket will be used to store images uploaded from the Broadcast APP
+  S3BucketStoredImages:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketStoredImagesName
+      CorsConfiguration:
+        CorsRules:
+        - AllowedMethods:
+          - PUT
+          AllowedOrigins:
+          - '*'
+          AllowedHeaders:
+          - '*'
+          
+# S3 bucket will be used for Vod Storage / playback
+  S3BucketStoredVod:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketStoredVodName
+      CorsConfiguration:
+        CorsRules:
+        - AllowedMethods:
+          - PUT
+          AllowedOrigins:
+          - '*'
+          AllowedHeaders:
+          - '*'
+# API Gateway
+# * CreateChannel()
+# * GetStream()
+# * ListStreams() 
+# * GetChannel()
+# * PutMetadata()
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref ApiGatewayRestApiName
+      Description: An API Gateway with a Lambda Integration
+      EndpointConfiguration:
+        Types:
+          - EDGE
+
+# * CreateChannel()
+  ApiGatewayCreateChannelResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'CreateChannel'
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayCreateChannelMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaCreateChannelFunction.Arn}/invocations'
+      OperationName: 'CreateChannel'
+      ResourceId: !Ref ApiGatewayCreateChannelResource
+      RestApiId: !Ref ApiGatewayRestApi
+
+# * GetStream()
+  ApiGatewayGetStreamResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'GetStream'
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayGetStreamMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false아무
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: GET
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaGetStreamFunction.Arn}/invocations'
+      OperationName: 'GetStream'
+      ResourceId: !Ref ApiGatewayGetStreamResource
+      RestApiId: !Ref ApiGatewayRestApi
+      
+# Create Presigned Url
+  ApiGatewayGetPresignedUrlResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'GetPresignedUrl'
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayCreatePresignedUrlMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ApiKeyRequired: false
+      AuthorizationType: NONE
+      HttpMethod: GET
+      Integration:
+        ConnectionType: INTERNET
+        Credentials: !GetAtt ApiGatewayIamRole.Arn
+        IntegrationHttpMethod: GET
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        Type: AWS_PROXY
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaCreatePresignedUrlFunction.Arn}/invocations'
+      OperationName: 'GetStream'
+      ResourceId: !Ref ApiGatewayGetPresignedUrlResource
+      RestApiId: !Ref ApiGatewayRestApi
+
+# * ListStreams() 
+# * GetChannel()
+# * PutMetadata()
+
+  ApiGatewayModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: 'application/json'
+      RestApiId: !Ref ApiGatewayRestApi
+      Schema: {}
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      DeploymentId: !Ref ApiGatewayDeployment
+      Description: Lambda API Stage for Test
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: 'dev'
+  
+  # ApiGatewayStageProd:
+  #   Type: AWS::ApiGateway::Stage
+  #   Properties:
+  #     DeploymentId: !Ref ApiGatewayDeployment
+  #     Description: Lambda API Stage for Production
+  #     RestApiId: !Ref ApiGatewayRestApi
+  #     StageName: 'prod'
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: 
+      - ApiGatewayCreateChannelMethod
+      - ApiGatewayGetStreamMethod
+      - ApiGatewayCreatePresignedUrlMethod
+    Properties:
+      Description: Lambda API Deployment
+      RestApiId: !Ref ApiGatewayRestApi
+
+  ApiGatewayIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: 'Allow'
+            Principal:
+              Service:
+                - 'apigateway.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: LambdaAccessDemoPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action: 'lambda:*'
+                Resource: '*'
+
+#Lamnda
+# * CreateChannel()
+  LambdaCreateChannelFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          def handler(event, context):
+            response = {
+              'isBase64Encoded': False,
+              'statusCode': 200,
+              'headers': {},
+              'multiValueHeaders': {},
+              'body': 'Hello, World!'
+            }
+            return response
+      Description: AWS Lambda function
+      FunctionName: 'LambdaCreateChannelFunction'
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: python3.7
+      Timeout: 60
+
+# * GetStream()
+  LambdaGetStreamFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          def handler(event, context):
+            response = {
+              'isBase64Encoded': False,
+              'statusCode': 200,
+              'headers': {},
+              'multiValueHeaders': {},
+              'body': 'Hello, World!'
+            }
+            return response
+      Description: AWS Lambda function
+      FunctionName: 'LambdaGetStreamFunction'
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: python3.7
+      Timeout: 60
+
+
+# * ListStreams() 
+# * GetChannel()
+# create a presigned URL
+  LambdaCreatePresignedUrlFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code: 
+        S3Bucket: !Ref S3BucketLambdaSource
+        S3Key: LambdaCreatePresignedUrlFunction.zip
+      Description: AWS Lambda Create Pre-signed Url Function
+      FunctionName: 'LambdaCreatePresignedUrlFunction'
+      Environment:
+        Variables:
+          S3BUCKET_STORED_IMAGES: !Ref S3BucketStoredImagesName
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: nodejs12.x
+      Timeout: 60
+
+  lambdaApiGatewayCreatePresignedUrlInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt LambdaCreatePresignedUrlFunction.Arn
+      Principal: "apigateway.amazonaws.com"
+      # SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${apiGateway}/*/GET/"
+
+# * PutMetadata()
+  LambdaPutMetadataFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          def handler(event, context):
+            response = {
+              'isBase64Encoded': False,
+              'statusCode': 200,
+              'headers': {},
+              'multiValueHeaders': {},
+              'body': 'Hello, World!'
+            }
+            return response
+      Description: AWS Lambda function
+      FunctionName: 'LambdaPutMetadataFunction'
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt LambdaIamRole.Arn
+      Runtime: python3.8
+      Timeout: 60
+
+  LambdaIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: !Join 
+            - '-'
+            - - !Ref 'AWS::StackName'
+              - UseS3andDBDemoPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:*'
+                  - 's3:*'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+
+# DynamoDB        
+  APIDynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Ref StreamLikesTableName
+      AttributeDefinitions:
+        - AttributeName: ID
+          AttributeType: S
+        - AttributeName: Likes
+          AttributeType: N
+      KeySchema:
+        - AttributeName: ID
+          KeyType: HASH
+        - AttributeName: Likes
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: !Ref DynamoReadCapacityUnits
+        WriteCapacityUnits: !Ref DynamoWriteCapacityUnits
+
+
+Outputs:
+  S3BucketStoredImagesName:
+    Value: !Ref S3BucketStoredImagesName
+    Description: The S3 bucket will be used to store images uploaded from the Broadcast APP
+  S3BucketStoredVodName:
+    Value: !Ref S3BucketStoredVodName
+    Description: The S3 bucket will be used for Vod Storage / playback
+  TableName:
+    Value: !Ref StreamLikesTableName
+    Description: The DynamoDB table
+  MainAPI:
+    Value: !Ref ApiGatewayRestApi
+    Description: The main API gateway
+  APIDeployment:
+    Value: !Ref ApiGatewayDeployment
+    Description: The deployment of the API
+  LambdaName:
+    Value: !Ref LambdaCreateChannelFunction
+    Description: The Lambda function
